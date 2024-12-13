@@ -15,51 +15,81 @@ import os
 import sys
 import pandas as pd
 import seaborn as sns
+import matplotlib
 import matplotlib.pyplot as plt
 import httpx
 import chardet
-from pathlib import Path
+from dotenv import load_dotenv, dotenv_values
+
+# Force non-interactive matplotlib backend
+matplotlib.use('Agg')
+
+# Load environment variables
+load_dotenv()
 
 # Constants
 API_URL = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
+AI_PROXY = os.getenv("AI_PROXY")
 
-# Ensure token is retrieved from environment variable
-def get_token():
-    try:
-        return os.environ["AI_PROXY"]
-    except KeyError:
-        print("Error: AI_PROXY environment variable not set.")
-        sys.exit(1)
+if not AI_PROXY:
+    raise ValueError("API token not set. Please set AI_PROXY in the environment.")
 
 def load_data(file_path):
     """Load CSV data with encoding detection."""
-    if not os.path.isfile(file_path):
-        print(f"Error: File '{file_path}' not found.")
+    try:
+        with open(file_path, 'rb') as f:
+            result = chardet.detect(f.read())
+        encoding = result['encoding']
+        return pd.read_csv(file_path, encoding=encoding)
+    except Exception as e:
+        print(f"Error loading file: {e}")
         sys.exit(1)
-    with open(file_path, 'rb') as f:
-        result = chardet.detect(f.read())
-    encoding = result['encoding']
-    print(f"Detected file encoding: {encoding}")
-    return pd.read_csv(file_path, encoding=encoding)
 
-def generate_narrative(analysis, token, file_path):
+def analyze_data(df):
+    """Perform basic data analysis."""
+    numeric_df = df.select_dtypes(include=['number'])  # Select only numeric columns
+    analysis = {
+        'summary': df.describe(include='all').to_dict(),
+        'missing_values': df.isnull().sum().to_dict(),
+        'correlation': numeric_df.corr().to_dict()  # Compute correlation only on numeric columns
+    }
+    return analysis
+
+def visualize_data(df, output_dir, base_name):
+    """Generate and save visualizations."""
+    sns.set(style="whitegrid")
+    
+    # Select only numeric columns for the correlation matrix
+    numeric_df = df.select_dtypes(include=['number'])
+    
+    if not numeric_df.empty:
+        # Generate correlation heatmap if there are numeric columns
+        correlation_matrix = numeric_df.corr()  # Only numeric columns are included
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f', cbar=True)
+        plt.title('Correlation Heatmap')
+        plt.savefig(os.path.join(output_dir, f'{base_name}_heatmap.png'))
+        plt.close()
+    else:
+        print("No numeric columns to compute correlation.")
+
+    # Generate histograms for numeric columns, but limit to only 2
+    numeric_columns = df.select_dtypes(include=['number']).columns
+    if len(numeric_columns) >= 2:  # Ensure there are at least 2 numeric columns for histograms
+        for column in numeric_columns[:2]:  # Limit to 2 charts (after the heatmap)
+            plt.figure()
+            sns.histplot(df[column].dropna(), kde=True)
+            plt.title(f'Distribution of {column}')
+            plt.savefig(os.path.join(output_dir, f'{base_name}_{column}_distribution.png'))
+            plt.close()
+
+def generate_narrative(analysis, base_name):
     """Generate narrative using LLM."""
     headers = {
-        'Authorization': f'Bearer {token}',
+        'Authorization': f'Bearer {AI_PROXY}',
         'Content-Type': 'application/json'
     }
-    
-    # Prepare the prompt for narrative generation
-    prompt = (
-        f"You are a data analyst. Provide a detailed narrative based on the following data analysis results for the file '{file_path.name}':\n\n"
-        f"Column Names & Types: {list(analysis['summary'].keys())}\n\n"
-        f"Summary Statistics: {analysis['summary']}\n\n"
-        f"Missing Values: {analysis['missing_values']}\n\n"
-        f"Correlation Matrix: {analysis['correlation']}\n\n"
-        "Based on this information, please provide insights into any trends, outliers, anomalies, "
-        "or patterns you can detect. Suggest additional analyses that could provide more insights, such as clustering, anomaly detection, etc."
-    )
-    
+    prompt = f"Provide a detailed analysis based on the following data summary: {analysis}"
     data = {
         "model": "gpt-4o-mini",
         "messages": [{"role": "user", "content": prompt}]
@@ -76,165 +106,41 @@ def generate_narrative(analysis, token, file_path):
         print(f"An unexpected error occurred: {e}")
     return "Narrative generation failed due to an error."
 
-def analyze_data(df, token):
-    """Use LLM to suggest and perform data analysis."""
-    if df.empty:
-        print("Error: Dataset is empty.")
-        sys.exit(1)
+def main():
+    import argparse
 
-    # Prepare the prompt to ask the LLM for analysis suggestions
-    prompt = (
-        f"You are a data analyst. Given the following dataset information, provide an analysis plan:\n\n"
-        f"Columns: {list(df.columns)}\n"
-        f"Data Types: {df.dtypes.to_dict()}\n"
-        f"First 5 rows of data:\n{df.head()}\n\n"
-        "Please suggest useful data analysis techniques, such as correlation analysis, regression, anomaly detection, clustering, or others."
-    )
-    
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json'
-    }
-    data = {
-        "model": "gpt-4o-mini",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    try:
-        # Requesting analysis suggestions from the LLM
-        response = httpx.post(API_URL, headers=headers, json=data, timeout=30.0)
-        response.raise_for_status()
-        suggestions = response.json()['choices'][0]['message']['content']
-        print(f"LLM Suggestions: {suggestions}")
-    except httpx.HTTPStatusError as e:
-        print(f"HTTP error occurred: {e}")
-    except httpx.RequestError as e:
-        print(f"Request error occurred: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        suggestions = "No suggestions from LLM."
-    
-    # Continue with basic analysis (summary statistics, missing values, correlations)
-    numeric_df = df.select_dtypes(include=['number'])
-    analysis = {
-        'summary': df.describe(include='all').to_dict(),  # Remove datetime_is_numeric argument
-        'missing_values': df.isnull().sum().to_dict(),
-        'correlation': numeric_df.corr().to_dict() if not numeric_df.empty else {}
-    }
-    print("Data analysis complete.")
-    
-    return analysis, suggestions
+    parser = argparse.ArgumentParser(description="Analyze datasets and generate insights.")
+    parser.add_argument("file_path", nargs="?", default=None, help="Path to the dataset CSV file.")
+    parser.add_argument("-o", "--output_dir", default="output", help="Directory to save outputs.")
+    args = parser.parse_args()
 
-def visualize_data(df, output_dir, analysis, token):
-    """Generate and save visualizations using LLM insights."""
-    sns.set(style="whitegrid")
-    numeric_columns = df.select_dtypes(include=['number']).columns
-    
-    # Ensure output directory exists
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # If file_path is not provided as an argument, prompt the user for the file path
+    if not args.file_path:
+        args.file_path = input("Please enter the file path to the dataset CSV file: ")
 
-    # Request visualization suggestions from LLM
-    prompt = (
-        f"You are a data visualization expert. Based on the following analysis results, suggest useful visualizations:\n\n"
-        f"Summary Statistics: {analysis['summary']}\n"
-        f"Missing Values: {analysis['missing_values']}\n"
-        f"Correlation Matrix: {analysis['correlation']}\n\n"
-        "Suggest visualizations that could highlight insights or patterns in the data."
-    )
-    
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json'
-    }
-    data = {
-        "model": "gpt-4o-mini",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    try:
-        response = httpx.post(API_URL, headers=headers, json=data, timeout=30.0)
-        response.raise_for_status()
-        visualizations_suggestions = response.json()['choices'][0]['message']['content']
-        print(f"LLM Visualization Suggestions: {visualizations_suggestions}")
-    except httpx.HTTPStatusError as e:
-        print(f"HTTP error occurred: {e}")
-    except httpx.RequestError as e:
-        print(f"Request error occurred: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        visualizations_suggestions = "No visualization suggestions from LLM."
+    # Extract the base name from the file path (without extension)
+    base_name = os.path.splitext(os.path.basename(args.file_path))[0]
 
-    # Distribution plots
-    for column in numeric_columns:
-        plt.figure(figsize=(6, 6))
-        sns.histplot(df[column].dropna(), kde=True)
-        plt.title(f'Distribution of {column}')
-        file_name = output_dir / f'{column}_distribution.png'
-        plt.savefig(file_name, dpi=100)
-        print(f"Saved distribution plot: {file_name}")
-        plt.close()
+    # Ensure the output directory exists
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    # Correlation heatmap
-    if not numeric_columns.empty:
-        plt.figure(figsize=(6, 6))
-        corr = df[numeric_columns].corr()
-        sns.heatmap(corr, annot=True, cmap='coolwarm', square=True)
-        plt.title('Correlation Heatmap')
-        file_name = output_dir / 'correlation_heatmap.png'
-        plt.savefig(file_name, dpi=100)
-        print(f"Saved correlation heatmap: {file_name}")
-        plt.close()
+    # Load data
+    df = load_data(args.file_path)
 
-def save_narrative_with_images(narrative, output_dir):
-    """Save narrative to README.md and embed image links."""
-    readme_path = output_dir / 'README.md'
-    image_links = "\n".join(
-        [f"![{img.name}]({img.name})" for img in output_dir.glob('*.png')]
-    )
-    with open(readme_path, 'w') as f:
-        f.write(narrative + "\n\n" + image_links)
-    print(f"Narrative successfully written to {readme_path}")
+    # Analyze data
+    analysis = analyze_data(df)
 
-def main(file_path):
-    print("Starting autolysis process...")
-
-    # Ensure input file exists
-    file_path = Path(file_path)
-    if not file_path.is_file():
-        print(f"Error: File '{file_path}' does not exist.")
-        sys.exit(1)
-
-    # Load token
-    token = get_token()
-
-    # Load dataset
-    df = load_data(file_path)
-    print("Dataset loaded successfully.")
-
-    # Analyze data with LLM insights
-    print("Analyzing data...")
-    analysis, suggestions = analyze_data(df, token)
-    print(f"LLM Analysis Suggestions: {suggestions}")
-
-    # Create output directory
-    output_dir = Path(file_path.stem)  # Create a directory named after the dataset
-    output_dir.mkdir(exist_ok=True)
-
-    # Generate visualizations with LLM suggestions
-    print("Generating visualizations...")
-    visualize_data(df, output_dir, analysis, token)
+    # Visualize data (generate 3 PNGs, including heatmap)
+    visualize_data(df, args.output_dir, base_name)
 
     # Generate narrative
-    print("Generating narrative using LLM...")
-    narrative = generate_narrative(analysis, token, file_path)
-    
-    if narrative != "Narrative generation failed due to an error.":
-        save_narrative_with_images(narrative, output_dir)
-    else:
-        print("Narrative generation failed. Skipping README creation.")
+    narrative = generate_narrative(analysis, base_name)
 
-    print("Autolysis process completed.")
+    # Save narrative with dynamic name
+    with open(os.path.join(args.output_dir, f'{base_name}_README.md'), 'w') as f:
+        f.write(narrative)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python autolysis.py <file_path>")
-        sys.exit(1)
-    main(sys.argv[1])
+    main()
+
+
