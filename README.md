@@ -81,6 +81,49 @@ The system has been tested with the following datasets:
 2. Set up the environment variable for LLM authentication:
    ```bash
    export AI_PROXY=your-token-here
+   
+3. Running the Script via the `uv` CLI Tool:
+   ```bash
+    uv run autolysis.py dataset.csv
+4. The following output files will be generated in the working directory:
+- `README.md`: The main analysis report.
+- `*.png`: PNG files containing the generated visualizations.
+
+---
+
+# Technical Notes
+
+## Optimized LLM Utilization
+- Utilizes multiple queries to the LLM for in-depth analysis and visualization recommendations.
+- Integrates OpenAI's function-calling API to enhance the precision of the outputs.
+
+## Environment Configuration
+- The system requires the `AI_PROXY environment` variable for LLM authentication.
+
+## Visualization Tools
+- Seaborn and Matplotlib are used to generate high-quality visualizations that are insightful and easy to interpret.
+
+---
+
+## Deliverables
+1. **Core Python Script**
+   - `autolysis.py`:A self-contained script that implements the entire functionality of the system.
+
+2. **Generated Output Files**
+   - `README.md`: The comprehensive Markdown report.
+   - `*.png`:Visualization files in PNG format.
+
+---
+
+# Licensing
+This project is licensed under the MIT License. For more details, refer to the LICENSE file in the repository.
+
+---
+
+**This project demonstrates the integration of advanced analytics and LLM capabilities, offering a powerful tool for automated data analysis and visualization, with practical value for extracting insights and enhancing decision-making.**
+
+
+
 
 
 
