@@ -25,7 +25,7 @@ matplotlib.use('Agg')
 class DataAnalysisConfig:
     """Configuration class for data analysis settings."""
     load_dotenv()
-    api_key = os.environ["AIPROXY_TOKEN"]
+    api_key = os.environ["AI_PROXY"]
     if api_key is None:
         print("Error: Authentication token is required.")
         sys.exit(1)
@@ -320,9 +320,9 @@ def main():
 
     try:
         load_dotenv()
-        api_key = os.environ["AIPROXY_TOKEN"]
+        api_key = os.environ["AI_PROXY"]
     except KeyError:
-        raise ValueError("AIPROXY_TOKEN environment variable not set.")
+        raise ValueError("AI_PROXY environment variable not set.")
     
     # Create output directory
     output_directory = os.path.splitext(os.path.basename(dataset_file))[0]
