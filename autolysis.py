@@ -55,7 +55,7 @@ def analyze_data(df):
     }
     return analysis
 
-def visualize_data(df, output_dir, base_name):
+def visualize_data(df, output_dir):
     """Generate and save visualizations."""
     sns.set(style="whitegrid")
     
@@ -68,7 +68,7 @@ def visualize_data(df, output_dir, base_name):
         plt.figure(figsize=(10, 8))
         sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f', cbar=True)
         plt.title('Correlation Heatmap')
-        plt.savefig(os.path.join(output_dir, f'{base_name}_heatmap.png'))
+        plt.savefig(os.path.join(output_dir, 'heatmap.png'))
         plt.close()
     else:
         print("No numeric columns to compute correlation.")
@@ -76,14 +76,14 @@ def visualize_data(df, output_dir, base_name):
     # Generate histograms for numeric columns, but limit to only 2
     numeric_columns = df.select_dtypes(include=['number']).columns
     if len(numeric_columns) >= 2:  # Ensure there are at least 2 numeric columns for histograms
-        for column in numeric_columns[:2]:  # Limit to 2 charts (after the heatmap)
+        for i, column in enumerate(numeric_columns[:2]):  # Limit to 2 charts (after the heatmap)
             plt.figure()
             sns.histplot(df[column].dropna(), kde=True)
             plt.title(f'Distribution of {column}')
-            plt.savefig(os.path.join(output_dir, f'{base_name}_{column}_distribution.png'))
+            plt.savefig(os.path.join(output_dir, f'histogram{i + 1}.png'))
             plt.close()
 
-def generate_narrative(analysis, base_name):
+def generate_narrative(analysis):
     """Generate narrative using LLM."""
     headers = {
         'Authorization': f'Bearer {AI_PROXY}',
@@ -118,9 +118,6 @@ def main():
     if not args.file_path:
         args.file_path = input("Please enter the file path to the dataset CSV file: ")
 
-    # Extract the base name from the file path (without extension)
-    base_name = os.path.splitext(os.path.basename(args.file_path))[0]
-
     # Ensure the output directory exists
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -131,16 +128,14 @@ def main():
     analysis = analyze_data(df)
 
     # Visualize data (generate 3 PNGs, including heatmap)
-    visualize_data(df, args.output_dir, base_name)
+    visualize_data(df, args.output_dir)
 
     # Generate narrative
-    narrative = generate_narrative(analysis, base_name)
+    narrative = generate_narrative(analysis)
 
-    # Save narrative with dynamic name
-    with open(os.path.join(args.output_dir, f'{base_name}_README.md'), 'w') as f:
+    # Save narrative with a generic name
+    with open(os.path.join(args.output_dir, 'README.md'), 'w') as f:
         f.write(narrative)
 
 if __name__ == "__main__":
     main()
-
-
